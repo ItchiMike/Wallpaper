@@ -1,0 +1,65 @@
+name: Construire l'APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Extraire le code de l'appli
+        run: |
+          test -f source.zip || { echo "::error::source.zip introuvable à la racine du dépôt"; exit 1; }
+          unzip -q -o source.zip -d appsrc
+          # accepte aussi un zip qui contient un dossier parent
+          if [ ! -f appsrc/settings.gradle ]; then
+            inner=$(dirname "$(find appsrc -name settings.gradle | head -1)")
+            echo "Projet trouvé dans $inner"
+            echo "APP_DIR=$inner" >> "$GITHUB_ENV"
+          else
+            echo "APP_DIR=appsrc" >> "$GITHUB_ENV"
+          fi
+
+      - name: Installer Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Installer le SDK Android
+        uses: android-actions/setup-android@v3
+
+      - name: Installer Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Compiler l'APK
+        working-directory: ${{ env.APP_DIR }}
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Renommer l'APK
+        run: cp "$APP_DIR/app/build/outputs/apk/release/app-release.apk" "Wallpapers-v${{ github.run_number }}.apk"
+
+      - name: Garder l'APK dans l'onglet Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wallpapers-v${{ github.run_number }}
+          path: Wallpapers-v${{ github.run_number }}.apk
+
+      - name: Publier une Release (téléchargement direct depuis le téléphone)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ github.run_number }}" "Wallpapers-v${{ github.run_number }}.apk" \
+            --repo "${{ github.repository }}" \
+            --title "Wallpapers v${{ github.run_number }}" \
+            --notes "APK construit automatiquement le $(date -u '+%d/%m/%Y à %H:%M') UTC."
